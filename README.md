@@ -1,4 +1,4 @@
-# Competitive Watch – MVP
+# Competitive Watch/scrape – MVP
 
 Outil de **veille concurrentielle** pour suivre les changements sur les pages web de concurrents (contenu, tarifs…) et générer des **rapports de synthèse** (avec IA ou sans).
 
