@@ -1,0 +1,165 @@
+// mainPurpose / objectifPrincipal :
+// Définition du modèle de données pour l'outil de veille concurrents.
+// Definition of the data model for the competitive watch tool.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // dbConnection / connexionBD : utilise la variable d'environnement
+}
+
+// frequency / frequence : fréquence souhaitée des collectes (même si MVP = lancement manuel)
+enum Frequency {
+  MANUAL   // manualRun / exécutionManuelle
+  DAILY    // dailyRun / exécutionQuotidienne
+  WEEKLY   // weeklyRun / exécutionHebdomadaire
+  MONTHLY  // monthlyRun / exécutionMensuelle
+}
+
+// pageType / typePage : type fonctionnel de la page surveillée
+enum PageType {
+  PRICING   // pricingPage / pageTarifs
+  LANDING   // landingPage / pageAccueilMarketing
+  PRODUCT   // productPage / pageProduit
+  BLOG      // blogPage / pageBlog
+  OTHER     // otherPage / autrePage
+}
+
+// changeType / typeChangement : nature du changement détecté
+enum ChangeType {
+  TEXT            // textChange / changementTexte
+  PRICE           // priceChange / changementPrix
+  SECTION_ADDED   // sectionAdded / sectionAjoutee
+  SECTION_REMOVED // sectionRemoved / sectionSupprimee
+  OTHER           // otherChange / autreChangement
+}
+enum CompetitorStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+// Project / Projet : une mission de veille pour une entreprise ou un client
+model Project {
+  id          Int          @id @default(autoincrement())
+  name        String       // projectName / nomDuProjet
+  description String?      // projectDescription / descriptionDuProjet
+  frequency   Frequency    @default(MANUAL) // runFrequency / frequenceExecution
+
+  competitors Competitor[] // relatedCompetitors / concurrentsAssocies
+  reports     Report[]     // relatedReports / rapportsAssocies
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([frequency], name: "idx_project_frequency") // indexFrequency / indexFrequence
+}
+
+// Competitor / Concurrent : un concurrent surveillé dans un projet
+model Competitor {
+  id          Int             @id @default(autoincrement())
+  projectId   Int
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  status      CompetitorStatus  @default(ACTIVE)
+  
+  name        String          // competitorName / nomConcurrent
+  websiteUrl  String?         // mainWebsite / sitePrincipal
+  description String?         // competitorDescription / descriptionConcurrent
+  tags        String?         // tagsCommaSeparated / tagsSeparesParVirgule (ex: "SaaS,Analytics,SMB")
+
+  monitoredPages MonitoredPage[] // watchedPages / pagesSurveillees
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([projectId], name: "idx_competitor_project")
+}
+
+// MonitoredPage / PageSurveillee : une URL précise à scrapper chez un concurrent
+model MonitoredPage {
+  id           Int          @id @default(autoincrement())
+  competitorId Int
+  competitor   Competitor   @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  url          String       // pageUrl / urlPage
+  pageType     PageType     @default(OTHER) // businessPageType / typeFonctionnelDePage
+  note         String?      // internalNote / noteInterne
+
+  snapshots    Snapshot[]   // pageSnapshots / instantanesPage
+  changes      Change[]     // pageChanges / changementsPage
+
+  createdAt    DateTime     @default(now())
+
+  @@index([competitorId], name: "idx_page_competitor")
+  @@index([pageType], name: "idx_page_type")
+}
+
+// Snapshot / Instantane : "photo" du contenu d'une page à un instant T
+model Snapshot {
+  id              Int            @id @default(autoincrement())
+  monitoredPageId Int
+  monitoredPage   MonitoredPage  @relation(fields: [monitoredPageId], references: [id], onDelete: Cascade)
+
+  capturedAt      DateTime       @default(now()) // captureTime / dateCapture
+
+  rawHtml         String?        @db.Text  // rawHtmlContent / contenuHtmlBrut
+  extractedText   String?        @db.Text  // cleanTextContent / contenuTexteNettoye
+  extractedPricing Json?         // pricingData / donneesTarifaires (JSON)
+
+  // Relations inverses pour les changements qui référencent ce snapshot
+  changesAsOld    Change[]       @relation("SnapshotAsOld") // usedAsOldInChanges / utiliseCommeAncien
+  changesAsNew    Change[]       @relation("SnapshotAsNew") // usedAsNewInChanges / utiliseCommeNouveau
+
+  createdAt       DateTime       @default(now())
+
+  @@index([monitoredPageId, capturedAt], name: "idx_snapshot_page_captured")
+}
+
+// Change / Changement : ce qui a changé entre deux snapshots d'une même page
+model Change {
+  id              Int           @id @default(autoincrement())
+  monitoredPageId Int
+  monitoredPage   MonitoredPage @relation(fields: [monitoredPageId], references: [id], onDelete: Cascade)
+
+  // Relations optionnelles vers l'ancien et le nouveau snapshot
+  oldSnapshotId   Int?
+  oldSnapshot     Snapshot?     @relation("SnapshotAsOld", fields: [oldSnapshotId], references: [id])
+
+  newSnapshotId   Int?
+  newSnapshot     Snapshot?     @relation("SnapshotAsNew", fields: [newSnapshotId], references: [id])
+
+  changeType      ChangeType    // changeCategory / categorieChangement
+  field           String?       // fieldName / nomChamp (ex: "pricing", "headline")
+  oldValue        String?       @db.Text // previousValue / valeurPrecedente
+  newValue        String?       @db.Text // newValue / nouvelleValeur
+  changeSummary   String?       @db.Text // shortSummary / resumeCourt
+
+  createdAt       DateTime      @default(now())
+
+  @@index([monitoredPageId], name: "idx_change_page")
+  @@index([changeType], name: "idx_change_type")
+  @@index([createdAt], name: "idx_change_created_at")
+}
+
+// Report / Rapport : rapport de veille généré pour un projet sur une période
+model Report {
+  id          Int       @id @default(autoincrement())
+  projectId   Int
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime? // periodStart / debutPeriode
+  periodEnd   DateTime? // periodEnd / finPeriode
+
+  generatedAt DateTime  @default(now()) // generationDate / dateGeneration
+
+  aiSummary   String?   @db.Text // aiGlobalSummary / resumeGlobalIA
+  highlights  Json?     // keyHighlights / pointsClés (liste de puces, JSON)
+  pdfUrl      String?   // pdfLocation / emplacementPdf
+
+  @@index([projectId], name: "idx_report_project")
+  @@index([generatedAt], name: "idx_report_generated_at")
+}
